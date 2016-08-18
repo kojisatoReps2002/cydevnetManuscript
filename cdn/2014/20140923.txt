@@ -1,0 +1,118 @@
+【関連レコードの項目を条件付きで集計】(2014/09/23)
+
+今回のTipsは、<a herf=https://cybozudev.zendesk.com/hc/ja/articles/203236240"">顧客ごとの自動採番</a>の続編といたしまして、引き続き「営業支援(SFA)パック」を利用したものです。「営業支援(SFA)パック」にある、顧客情報アプリには、その顧客に関連した案件情報が、標準機能である「関連レコード」にて参照可能になっておりますので、大変便利です。
+
+[画面1](顧客情報関連レコード)
+
+ところで、この案件一覧を見ていると、やはり受注金額などの列項目は、ここで集計した結果が見たくなりますね。アプリ内に設定されたテーブルパーツであれば、自動計算機能で集計が可能ですが、関連レコード一覧の項目を集計する機能は、残念ながら現在のバージョンにはありませんので、これをjsカスタマイズで計算してみましょう。
+
+また、関連レコードパーツの標準設定では、関連付けられたアプリのレコードを全て取得するようになっていますが、これを条件付きで設定した場合の考慮も行い、今回の例で言えば、案件の一覧という名称を考慮し「受注確度が受注以外」のものを条件としたいと思います。
+
+■フィールドの設定
+
+・まずは、顧客情報アプリのフォーム設定にて、関連レコードフィールド[案件一覧]の設定[さらに絞り込む条件]にて、下記のように[受注確度]が[受注]以外のものを検索するように設定します。
+
+[画面2](関連レコード設定画面)
+
+・また集計結果の表示領域用に、スペースパーツを要素ID[TotalAmount]にて、案件一覧パーツの下部に、追加します。関連レコードの受注金額項目の位置に合うように、任意の幅のスペースパーツと、[小計]ラベルも合わせて追加して下さい。
+
+[画面3](金額合計スペースパーツ)
+
+■コード
+フォームの詳細画面、編集画面表示のタイミングで計算を行うサンプルです。
+JavaScriptファイルができたら、「顧客情報」アプリに適用しましょう。
+
+
+(function() {
+    "use strict";
+
+    //レコードの編集、詳細画面で適用する
+    var events = [
+        'app.record.detail.show',
+        'app.record.edit.show'
+    ]
+    kintone.events.on(events, function(event) {
+        var record = event.record;
+        var client_rid = event.recordId;
+        var related = kintone.app.getRelatedRecordsTargetAppId('関連レコード一覧');
+        var offset = 0;
+        var loop_end_flg = false;
+        var records = new Array();
+        while(!loop_end_flg){
+            var query = '顧客情報レコード番号="' + client_rid +
+                '" and ドロップダウン not in ("受注")' +
+                ' limit 100 offset ' + offset;
+            query = encodeURIComponent(query);
+            var appUrl = kintone.api.url('/k/v1/records') + '?app='+ related + '&query=' + query;
+
+            // 同期リクエストを行う
+            var xmlHttp = new XMLHttpRequest();
+            xmlHttp.open("GET", appUrl, false);
+            xmlHttp.setRequestHeader('X-Requested-With','XMLHttpRequest');
+            xmlHttp.send(null);
+
+            //取得したレコードをArrayに格納
+            var resp_data = JSON.parse(xmlHttp.responseText);
+
+            if(resp_data.records.length > 0){
+                for(var i = 0; resp_data.records.length > i; i++){
+                    records.push(resp_data.records[i]);
+                }
+                offset += resp_data.records.length;
+            }else{
+                loop_end_flg = true;
+            }
+        }
+
+        var amount = 0;
+        for (var i = 0; i < records.length; i++) {
+            amount = amount + parseFloat(records[i].数値.value);
+        }
+
+        var divTotalAmount = document.createElement('div');
+        divTotalAmount.style.fontWeight = 'bold';
+        divTotalAmount.style.textAlign = 'right';
+        divTotalAmount.style.fontSize = 12;
+        var wString = String(amount.toFixed(0).replace(/(\d)(?=(\d\d\d)+(?!\d))/g, '$1,'));
+        divTotalAmount.innerHTML = "\\" + wString + "-";
+        kintone.app.record.getSpaceElement("TotalAmount").appendChild(divTotalAmount);
+
+        return event;
+
+    });
+})();
+
+
+■ソースコードの解説
+関連レコードパーツに設定した条件と同様に顧客情報のアプリを検索するために、以下のクエリを作成しています。
+
+            var query = '顧客情報レコード番号="' + client_rid +
+                '" and ドロップダウン not in ("受注")' +
+                ' limit 100 offset ' + offset;
+
+受注確度から、受注のものを除外する点につきましては、<a href="http://goo.gl/VWgiAa">こちらのドキュメント</a>にありますように「ドロップダウン」パーツについては、not in句で検索するところがポイントです。
+
+同期リクエストの発行、offsetを考慮したロジックは<a href="http://goo.gl/ibzwiP">こちらのTips</a>を参考にしました。
+
+コード適用後、以下のように小計計算の結果が出力されます。
+
+[画面4](条件検索結果 + 小計計算出力)
+
+■注意事項など
+[顧客情報レコード番号]パーツにつきましては<a href="">前記事</a>で作成したものを利用しておりますので、このTipsのみ実行する場合はそちらをご参照の上、設定をお願い致します。
+
+今回のTipsでは条件付きということで、関連レコードパーツに条件を設定し、その条件と同様のqueryを発行するものとさせて頂きましたか、条件が特になく単に全レコードの合計をする場合は、該当条件部分を読み飛ばして頂ければ全体の集計が行われます。レコード件数をoffset(100)値にて除算した回数分のサーバーとのやりとりは発生しますので、条件の有無に関わらず、データ件数に応じた処理時間がかかる点と、関連レコードパーツは、標準で5件にてページングを行いますが、小計行の計算は全体の計算を実行しますので、その点はご留意のほど、よろしくお願い致します。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
